@@ -1,0 +1,3 @@
+(Seq (Assign "varX" (Const (I 5)))
+(Assign "varX" ( (Add (Var "varX") (Const (I 2)) ) ) )
+)
