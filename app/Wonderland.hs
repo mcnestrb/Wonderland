@@ -134,6 +134,8 @@ exec (Assign s v) = do st <- get
                          _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward"
                                    exec (Assign s v)
 
+exec (Seq s0 s1) = do exec s0 >> exec s1
+
 exec (Print e) = do st <- get
                     Right val <- return $ runEval st (eval e)
                     liftIO $ System.print $ "Next line to execute: " ++ show (Print e)
@@ -143,16 +145,27 @@ exec (Print e) = do st <- get
                                 return ()
                       _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward"
                                 exec (Print e)
-{-
+
 exec (If cond s0 s1) = do st <- get
                           Right (B val) <- return $ runEval st (eval cond)
-													liftIO $ System.print $ show (If cond s0 s1)
-													letter <- liftIO $ getLine
-													case letter of
-														"n" -> do liftIO $ if val then do exec s0 else do exec s1
-														_   -> do liftIO $ System.print $ "Not a valid input - press n to step forward"
-			                                exec (If cond s0 s1)
--}
+                          liftIO $ System.print $ "Next line to execute: " ++ show (If cond s0 s1)
+                          letter <- liftIO $ getLine
+                          case letter of
+                            "n" -> if val then do exec s0 else do exec s1
+                            _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward"
+                                      exec (If cond s0 s1)
+
+exec (While cond s) = do st <- get
+                         Right (B val) <- return $ runEval st (eval cond)
+                         liftIO $ System.print $ "Next line to execute: " ++ show (While cond s)
+                         letter <- liftIO $ getLine
+                         case letter of
+                           "n" -> if val then do exec s >> exec (While cond s) else return ()
+                           _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward"
+                                     exec (While cond s)
+
+exec (Try s0 s1) = do catchError (exec s0) (\e -> exec s1)
+
 step :: [Statement] -> Run ()
 step [] = return ()
 step (stat:stats) = do exec stat
