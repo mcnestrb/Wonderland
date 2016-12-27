@@ -1,1 +1,3 @@
-(Assign "varX" (Const (I 2)))
+Seq (Assign "varX" (Const (I 2)))
+(Seq (Print (Const (I 3)))
+(Print (Var "varX")))
