@@ -45,6 +45,10 @@ lookup k t = case Map.lookup k t of
                 Just x -> return $ head x
                 Nothing -> fail ("Unknown variable "++k)
 
+lookupHistory k t = case Map.lookup k t of
+                Just x -> return x
+                Nothing -> fail ("Unknown variable "++k)
+
 -- {-- Monadic style expression evaluator,
 --  -- with error handling and Reader monad instance to carry dictionary
 --  --}
@@ -125,43 +129,78 @@ set n v = do st <- get
                Just maybeVals -> state $ (\table -> ((), Map.insert n (v:maybeVals) table))
 
 exec :: Statement -> Run ()
+exec (Seq s0 s1) = do exec s0 >> exec s1
 exec (Assign s v) = do st <- get
                        Right val <- return $ runEval st (eval v)
                        liftIO $ System.print $ "Next line to execute: " ++ show (Assign s v)
-                       letter <- liftIO $ getLine
-                       case letter of
+                       input <- liftIO $ getLine
+                       case input of
                          "n" -> set s val
-                         _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward"
+                         "i" -> do liftIO $ System.print "Variables available to inspect:"
+                                   let currKeys = (Map.keys st)
+                                   liftIO $ mapM_ putStrLn (map show currKeys)
+                                   inspect <- liftIO $ getLine
+                                   case lookupHistory inspect st of
+                                     Just value -> do liftIO $ putStrLn $ show value
+                                                      exec (Assign s v)
+                                     Nothing -> do liftIO $ putStrLn "Not a valid variable"
+                                                   exec (Assign s v)
+                         _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
                                    exec (Assign s v)
-
-exec (Seq s0 s1) = do exec s0 >> exec s1
 
 exec (Print e) = do st <- get
                     Right val <- return $ runEval st (eval e)
                     liftIO $ System.print $ "Next line to execute: " ++ show (Print e)
-                    letter <- liftIO $ getLine
-                    case letter of
+                    input <- liftIO $ getLine
+                    case input of
                       "n" -> do liftIO $ System.print val
                                 return ()
-                      _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward"
+                      "i" -> do liftIO $ System.print "Variables available to inspect:"
+                                let currKeys = (Map.keys st)
+                                liftIO $ mapM_ putStrLn (map show currKeys)
+                                inspect <- liftIO $ getLine
+                                case lookupHistory inspect st of
+                                  Just value -> do liftIO $ putStrLn $ show value
+                                                   exec (Print e)
+                                  Nothing -> do liftIO $ putStrLn "Not a valid variable"
+                                                exec (Print e)
+                      _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
                                 exec (Print e)
 
 exec (If cond s0 s1) = do st <- get
                           Right (B val) <- return $ runEval st (eval cond)
                           liftIO $ System.print $ "Next line to execute: " ++ show (If cond s0 s1)
-                          letter <- liftIO $ getLine
-                          case letter of
+                          input <- liftIO $ getLine
+                          case input of
                             "n" -> if val then do exec s0 else do exec s1
-                            _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward"
+                            "i" -> do liftIO $ System.print "Variables available to inspect:"
+                                      let currKeys = (Map.keys st)
+                                      liftIO $ mapM_ putStrLn (map show currKeys)
+                                      inspect <- liftIO $ getLine
+                                      case lookupHistory inspect st of
+                                        Just value -> do liftIO $ putStrLn $ show value
+                                                         exec (If cond s0 s1)
+                                        Nothing -> do liftIO $ putStrLn "Not a valid variable"
+                                                      exec (If cond s0 s1)
+                            _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
                                       exec (If cond s0 s1)
 
 exec (While cond s) = do st <- get
                          Right (B val) <- return $ runEval st (eval cond)
                          liftIO $ System.print $ "Next line to execute: " ++ show (While cond s)
-                         letter <- liftIO $ getLine
-                         case letter of
+                         input <- liftIO $ getLine
+                         case input of
                            "n" -> if val then do exec s >> exec (While cond s) else return ()
-                           _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward"
+                           "i" -> do liftIO $ System.print "Variables available to inspect:"
+                                     let currKeys = (Map.keys st)
+                                     liftIO $ mapM_ putStrLn (map show currKeys)
+                                     inspect <- liftIO $ getLine
+                                     case lookupHistory inspect st of
+                                       Just value -> do liftIO $ putStrLn $ show value
+                                                        exec (While cond s)
+                                       Nothing -> do liftIO $ putStrLn "Not a valid variable"
+                                                     exec (While cond s)
+                           _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
                                      exec (While cond s)
 
 exec (Try s0 s1) = do catchError (exec s0) (\e -> exec s1)
