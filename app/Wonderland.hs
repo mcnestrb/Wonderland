@@ -128,90 +128,51 @@ set n v = do st <- get
                Nothing -> state $ (\table -> ((), Map.insert n [v] table))
                Just maybeVals -> state $ (\table -> ((), Map.insert n (v:maybeVals) table))
 
-exec :: Statement -> Run ()
-exec (Seq s0 s1) = do exec s0 >> exec s1
-exec (Assign s v) = do st <- get
-                       Right val <- return $ runEval st (eval v)
-                       liftIO $ System.print $ "Next line to execute: " ++ show (Assign s v)
-                       input <- liftIO $ getLine
-                       case input of
-                         "n" -> set s val
-                         "i" -> do liftIO $ System.print "Variables available to inspect:"
-                                   let currKeys = (Map.keys st)
-                                   liftIO $ mapM_ putStrLn (map show currKeys)
-                                   inspect <- liftIO $ getLine
-                                   case lookupHistory inspect st of
-                                     Just value -> do liftIO $ putStrLn $ show value
-                                                      exec (Assign s v)
-                                     Nothing -> do liftIO $ putStrLn "Not a valid variable"
-                                                   exec (Assign s v)
-                         _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
-                                   exec (Assign s v)
+exec :: Statement -> [Statement] -> Run ()
+exec (Seq s0 s1) doneStats = do exec s0 doneStats >> exec s1 doneStats
 
-exec (Print e) = do st <- get
-                    Right val <- return $ runEval st (eval e)
-                    liftIO $ System.print $ "Next line to execute: " ++ show (Print e)
-                    input <- liftIO $ getLine
-                    case input of
-                      "n" -> do liftIO $ System.print val
-                                return ()
-                      "i" -> do liftIO $ System.print "Variables available to inspect:"
-                                let currKeys = (Map.keys st)
-                                liftIO $ mapM_ putStrLn (map show currKeys)
-                                inspect <- liftIO $ getLine
-                                case lookupHistory inspect st of
-                                  Just value -> do liftIO $ putStrLn $ show value
-                                                   exec (Print e)
-                                  Nothing -> do liftIO $ putStrLn "Not a valid variable"
-                                                exec (Print e)
-                      _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
-                                exec (Print e)
+exec (Assign s v) _ = do st <- get
+                         Right val <- return $ runEval st (eval v)
+                         set s val
 
-exec (If cond s0 s1) = do st <- get
-                          Right (B val) <- return $ runEval st (eval cond)
-                          liftIO $ System.print $ "Next line to execute: " ++ show (If cond s0 s1)
-                          input <- liftIO $ getLine
-                          case input of
-                            "n" -> if val then do exec s0 else do exec s1
-                            "i" -> do liftIO $ System.print "Variables available to inspect:"
-                                      let currKeys = (Map.keys st)
-                                      liftIO $ mapM_ putStrLn (map show currKeys)
-                                      inspect <- liftIO $ getLine
-                                      case lookupHistory inspect st of
-                                        Just value -> do liftIO $ putStrLn $ show value
-                                                         exec (If cond s0 s1)
-                                        Nothing -> do liftIO $ putStrLn "Not a valid variable"
-                                                      exec (If cond s0 s1)
-                            _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
-                                      exec (If cond s0 s1)
+exec (Print e) _ = do st <- get
+                      Right val <- return $ runEval st (eval e)
+                      liftIO $ System.print val
+                      return ()
 
-exec (While cond s) = do st <- get
-                         Right (B val) <- return $ runEval st (eval cond)
-                         liftIO $ System.print $ "Next line to execute: " ++ show (While cond s)
-                         input <- liftIO $ getLine
-                         case input of
-                           "n" -> if val then do exec s >> exec (While cond s) else return ()
-                           "i" -> do liftIO $ System.print "Variables available to inspect:"
-                                     let currKeys = (Map.keys st)
-                                     liftIO $ mapM_ putStrLn (map show currKeys)
-                                     inspect <- liftIO $ getLine
-                                     case lookupHistory inspect st of
-                                       Just value -> do liftIO $ putStrLn $ show value
-                                                        exec (While cond s)
-                                       Nothing -> do liftIO $ putStrLn "Not a valid variable"
-                                                     exec (While cond s)
-                           _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
-                                     exec (While cond s)
+exec (If cond s0 s1) doneStats = do st <- get
+                                    Right (B val) <- return $ runEval st (eval cond)
+                                    if val then do exec s0 doneStats else do exec s1 doneStats
 
-exec (Try s0 s1) = do catchError (exec s0) (\e -> exec s1)
+exec (While cond s) doneStats = do st <- get
+                                   Right (B val) <- return $ runEval st (eval cond)
+                                   if val then do exec s doneStats >> exec (While cond s) doneStats else return ()
 
-step :: [Statement] -> Run ()
-step [] = return ()
-step (stat:stats) = do exec stat
-                       step stats
+exec (Try s0 s1) doneStats = do catchError (exec s0 doneStats) (\e -> exec s1 doneStats)
+
+
+step :: [Statement] -> [Statement] -> Run ()
+step [] _ = return ()
+step (stat:stats) doneStats = do st <- get
+                                 liftIO $ liftIO $ System.print $ "Next line to execute: " ++ show stat
+                                 input <- liftIO $ getLine
+                                 case input of
+                                   "n" -> do exec stat doneStats
+                                             step stats (stat:doneStats)
+                                   "i" -> do liftIO $ System.print "Variables available to inspect:"
+                                             let currKeys = (Map.keys st)
+                                             liftIO $ mapM_ putStrLn (map show currKeys)
+                                             inspect <- liftIO $ getLine
+                                             case lookupHistory inspect st of
+                                               Just value -> do liftIO $ putStrLn $ show value
+                                                                step (stat:stats) doneStats
+                                               Nothing -> do liftIO $ putStrLn "Not a valid variable"
+                                                             step (stat:stats) doneStats
+                                   _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
+                                             step (stat:stats) doneStats
 
 run :: [Statement] -> IO ()
-run stats = do result <- runExceptT $ (runStateT $ step stats) Map.empty
+run stats = do result <- runExceptT $ (runStateT $ step stats []) Map.empty
                case result of
                  Right ((), env) -> return ()
                  Left exn -> System.print ("Uncaught exception " ++ exn)
