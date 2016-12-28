@@ -122,18 +122,21 @@ data Statement = Assign String Expr
 type Run a = StateT Env (ExceptT String IO) a
 runRun p = runExceptT (runStateT p Map.empty)
 
+-- check if name already exists in the state and either add the new value to the history or add a new entry
 set :: Name -> Val -> Run ()
 set n v = do st <- get
              case Map.lookup n st of
                Nothing -> state $ (\table -> ((), Map.insert n [v] table))
                Just maybeVals -> state $ (\table -> ((), Map.insert n (v:maybeVals) table))
 
+-- if the name exists then pop the head off to reveal the last value
 unset :: Name -> Run ()
 unset n = do st <- get
              case Map.lookup n st of
                Nothing -> return ()
                Just list -> state $ (\table -> ((), Map.insert n (tail list) table))
 
+-- execute a statement
 exec :: Statement -> [Statement] -> Run ()
 exec (Seq s0 s1) doneStats = do exec s0 doneStats >> exec s1 doneStats
 
@@ -156,6 +159,7 @@ exec (While cond s) doneStats = do st <- get
 
 exec (Try s0 s1) doneStats = do catchError (exec s0 doneStats) (\e -> exec s1 doneStats)
 
+-- step backwards over print and assign statements
 stepBack :: [Statement] -> Run ()
 stepBack [] = liftIO $ System.print "Nothing has been executed, cannot step back"
 
@@ -163,14 +167,21 @@ stepBack ((Assign s _):_) = unset s
 
 stepBack ((Print _):_) = return ()
 
+-- the main interpreter, maintains a list of the statements to be executed and a list of the statements that have been executed
 step :: [Statement] -> [Statement] -> Run ()
+-- if the file has been read then finish
 step [] _ = return ()
+-- step through the program
 step (stat:stats) doneStats = do st <- get
+                                 -- show the user what the next line in the code is so that they know where they are
                                  liftIO $ liftIO $ System.print $ "Next line to execute: " ++ show stat
+																 -- get user input
                                  input <- liftIO $ getLine
                                  case input of
+																	 -- Step Forward - execute the current statement and then stick it onto the head of the completed statements list
                                    "n" -> do exec stat doneStats
                                              step stats (stat:doneStats)
+                                   -- Inspect - shows the user what variables are avialable to inspect and then display the history if it exists
                                    "i" -> do liftIO $ System.print "Variables available to inspect:"
                                              let currKeys = (Map.keys st)
                                              liftIO $ mapM_ putStrLn (map show currKeys)
@@ -180,13 +191,16 @@ step (stat:stats) doneStats = do st <- get
                                                                 step (stat:stats) doneStats
                                                Nothing -> do liftIO $ putStrLn "Not a valid variable"
                                                              step (stat:stats) doneStats
+																	 -- Step Backward - for print statements and assigns, move the last executed statement to the top of the list of statements to be executed
                                    "u" -> do stepBack doneStats
                                              case length doneStats of
                                                0 -> step (stat:stats) doneStats
                                                _ -> step ((head doneStats):stat:stats) (tail doneStats)
+																	-- invalid keypress, prompts user to try again with suggestions
                                    _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward, i to inspect or u to step backward"
                                              step (stat:stats) doneStats
 
+-- initialise the enviroment and begin stepping through the program
 run :: [Statement] -> IO ()
 run stats = do result <- runExceptT $ (runStateT $ step stats []) Map.empty
                case result of
