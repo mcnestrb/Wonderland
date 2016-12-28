@@ -46,8 +46,8 @@ lookup k t = case Map.lookup k t of
                 Nothing -> fail ("Unknown variable "++k)
 
 lookupHistory k t = case Map.lookup k t of
-                Just x -> return x
-                Nothing -> fail ("Unknown variable "++k)
+                      Just x -> return x
+                      Nothing -> fail ("Unknown variable "++k)
 
 -- {-- Monadic style expression evaluator,
 --  -- with error handling and Reader monad instance to carry dictionary
@@ -128,6 +128,12 @@ set n v = do st <- get
                Nothing -> state $ (\table -> ((), Map.insert n [v] table))
                Just maybeVals -> state $ (\table -> ((), Map.insert n (v:maybeVals) table))
 
+unset :: Name -> Run ()
+unset n = do st <- get
+             case Map.lookup n st of
+               Nothing -> return ()
+               Just list -> state $ (\table -> ((), Map.insert n (tail list) table))
+
 exec :: Statement -> [Statement] -> Run ()
 exec (Seq s0 s1) doneStats = do exec s0 doneStats >> exec s1 doneStats
 
@@ -150,6 +156,12 @@ exec (While cond s) doneStats = do st <- get
 
 exec (Try s0 s1) doneStats = do catchError (exec s0 doneStats) (\e -> exec s1 doneStats)
 
+stepBack :: [Statement] -> Run ()
+stepBack [] = liftIO $ System.print "Nothing has been executed, cannot step back"
+
+stepBack ((Assign s _):_) = unset s
+
+stepBack ((Print _):_) = return ()
 
 step :: [Statement] -> [Statement] -> Run ()
 step [] _ = return ()
@@ -168,7 +180,11 @@ step (stat:stats) doneStats = do st <- get
                                                                 step (stat:stats) doneStats
                                                Nothing -> do liftIO $ putStrLn "Not a valid variable"
                                                              step (stat:stats) doneStats
-                                   _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward or i to inspect"
+                                   "u" -> do stepBack doneStats
+                                             case length doneStats of
+                                               0 -> step (stat:stats) doneStats
+                                               _ -> step ((head doneStats):stat:stats) (tail doneStats)
+                                   _   -> do liftIO $ System.print $ "Not a valid input - press n to step forward, i to inspect or u to step backward"
                                              step (stat:stats) doneStats
 
 run :: [Statement] -> IO ()

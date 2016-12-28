@@ -1,4 +1,6 @@
 Seq (Assign "x" (Const (I 0)))
+(Seq
 (While (Gt (Const (I 2)) (Var "x") )
 (Seq (Print (Var "x"))
 (Assign "x" (Add (Var "x") (Const (I 1)) ) )) )
+(Print (Const (I 7))) )
